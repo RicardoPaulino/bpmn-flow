@@ -448,15 +448,19 @@ export function SidebarPropertyPanel() {
 
             {/* Label / Name */}
             <div>
-              <label className="block text-slate-600 dark:text-slate-400 font-medium mb-1 flex items-center space-x-1">
-                <Tag className="w-3.5 h-3.5" />
-                <span>Element Name / Label</span>
+              <label className="block text-slate-600 dark:text-slate-400 font-medium mb-1 flex items-center justify-between">
+                <span className="flex items-center space-x-1">
+                  <Tag className="w-3.5 h-3.5" />
+                  <span>Element Name / Label</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-normal">Enter for line breaks</span>
               </label>
-              <input
-                type="text"
+              <textarea
+                rows={selectedNode.type === 'TEXT_ANNOTATION' ? 4 : 2}
                 value={selectedNode.label}
                 onChange={(e) => handleNodeUpdate({ label: e.target.value })}
-                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Type name or note... (Press Enter for line break)"
+                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs resize-y"
               />
             </div>
 
@@ -919,16 +923,19 @@ export function SidebarPropertyPanel() {
             </div>
 
             <div>
-              <label className="block text-slate-600 dark:text-slate-400 font-medium mb-1 flex items-center space-x-1">
-                <Tag className="w-3.5 h-3.5" />
-                <span>Flow Label</span>
+              <label className="block text-slate-600 dark:text-slate-400 font-medium mb-1 flex items-center justify-between">
+                <span className="flex items-center space-x-1">
+                  <Tag className="w-3.5 h-3.5" />
+                  <span>Flow Label</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-normal">Enter for line breaks</span>
               </label>
-              <input
-                type="text"
+              <textarea
+                rows={2}
                 value={selectedEdge.label || ''}
                 onChange={(e) => handleEdgeUpdate({ label: e.target.value })}
-                placeholder="e.g., Approved / Yes"
-                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="e.g., Approved / Yes (Press Enter for line break)"
+                className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 text-xs resize-y"
               />
             </div>
 

@@ -62,7 +62,7 @@ export const roomIdAtom = atom<string | null>(null as string | null);
 export const encryptionKeyAtom = atom<string | null>(null as string | null);
 export const remoteUsersAtom = atom<RemoteUser[]>([]);
 
-export type ModalType = 'diagrams' | 'ai_assistant' | 'simulation' | 'collaborate' | 'export' | null;
+export type ModalType = 'diagrams' | 'ai_assistant' | 'simulation' | 'collaborate' | 'export' | 'shortcuts' | null;
 
 // Active Modals
 export const activeModalAtom = atom<ModalType>(null as ModalType);

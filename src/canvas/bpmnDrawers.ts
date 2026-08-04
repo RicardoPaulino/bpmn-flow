@@ -368,6 +368,36 @@ function drawTaskHeaderIcon(ctx: CanvasRenderingContext2D, type: string, x: numb
   ctx.restore();
 }
 
+function wrapTextLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const paragraphs = text.split('\n');
+  const lines: string[] = [];
+
+  for (const para of paragraphs) {
+    if (para === '') {
+      lines.push('');
+      continue;
+    }
+    const words = para.split(' ');
+    let currentLine = '';
+
+    for (let n = 0; n < words.length; n++) {
+      const testLine = currentLine ? currentLine + ' ' + words[n] : words[n];
+      const metrics = ctx.measureText(testLine);
+      if (metrics.width > maxWidth && currentLine !== '') {
+        lines.push(currentLine);
+        currentLine = words[n];
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine !== '') {
+      lines.push(currentLine);
+    }
+  }
+
+  return lines.length > 0 ? lines : [''];
+}
+
 function drawNodeText(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -392,59 +422,39 @@ function drawNodeText(
 
   // Text positioning based on shape type
   if (type.includes('EVENT')) {
-    // Place below event circle
-    ctx.fillText(text, x + w / 2, y + h + 16);
+    // Place below event circle with multi-line support
+    const lines = wrapTextLines(ctx, text, Math.max(90, w + 40));
+    const lineHeight = 15;
+    const startY = y + h + 14;
+
+    lines.forEach((l, i) => {
+      ctx.fillText(l.trim(), x + w / 2, startY + i * lineHeight);
+    });
   } else if (type.includes('GATEWAY')) {
-    // Place below gateway diamond
-    ctx.fillText(text, x + w / 2, y + h + 18);
+    // Place below gateway diamond with multi-line support
+    const lines = wrapTextLines(ctx, text, Math.max(90, w + 40));
+    const lineHeight = 15;
+    const startY = y + h + 16;
+
+    lines.forEach((l, i) => {
+      ctx.fillText(l.trim(), x + w / 2, startY + i * lineHeight);
+    });
   } else if (type === 'TEXT_ANNOTATION') {
     // Left-aligned sticky note text starting from top
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillStyle = theme === 'dark' ? '#f8fafc' : '#1e293b';
 
-    const words = text.split(' ');
-    let line = '';
-    const lines = [];
-    const maxWidth = w - 20;
-
-    for (let n = 0; n < words.length; n++) {
-      const testLine = line + words[n] + ' ';
-      const metrics = ctx.measureText(testLine);
-      if (metrics.width > maxWidth && n > 0) {
-        lines.push(line);
-        line = words[n] + ' ';
-      } else {
-        line = testLine;
-      }
-    }
-    lines.push(line);
-
+    const lines = wrapTextLines(ctx, text, Math.max(20, w - 20));
     const lineHeight = 17;
     const startY = y + 10;
 
     lines.forEach((l, i) => {
-      ctx.fillText(l.trim(), x + 10, startY + i * lineHeight);
+      ctx.fillText(l, x + 10, startY + i * lineHeight);
     });
   } else {
     // Center inside Task rectangle with line wrapping
-    const words = text.split(' ');
-    let line = '';
-    const lines = [];
-    const maxWidth = w - 16;
-
-    for (let n = 0; n < words.length; n++) {
-      const testLine = line + words[n] + ' ';
-      const metrics = ctx.measureText(testLine);
-      if (metrics.width > maxWidth && n > 0) {
-        lines.push(line);
-        line = words[n] + ' ';
-      } else {
-        line = testLine;
-      }
-    }
-    lines.push(line);
-
+    const lines = wrapTextLines(ctx, text, Math.max(20, w - 16));
     const lineHeight = 16;
     const startY = y + h / 2 - ((lines.length - 1) * lineHeight) / 2;
 
@@ -463,16 +473,26 @@ function drawEdgeLabel(
   y: number,
   handDrawnFont: boolean
 ) {
+  if (!text) return;
+
   ctx.save();
   ctx.font = handDrawnFont
     ? '13px "Caveat", "Comic Sans MS", cursive, sans-serif'
     : '500 12px system-ui, -apple-system, sans-serif';
 
-  const metrics = ctx.measureText(text);
+  const lines = wrapTextLines(ctx, text, 160);
+  const lineHeight = 15;
   const paddingX = 6;
   const paddingY = 4;
-  const bw = metrics.width + paddingX * 2;
-  const bh = 18;
+
+  let maxLineWidth = 0;
+  lines.forEach((l) => {
+    const w = ctx.measureText(l).width;
+    if (w > maxLineWidth) maxLineWidth = w;
+  });
+
+  const bw = maxLineWidth + paddingX * 2;
+  const bh = Math.max(18, lines.length * lineHeight + paddingY * 2);
 
   // Background pill for label contrast
   ctx.fillStyle = '#ffffff';
@@ -487,7 +507,11 @@ function drawEdgeLabel(
   ctx.fillStyle = '#1e293b';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, x, y);
+
+  const startY = y - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((l, i) => {
+    ctx.fillText(l, x, startY + i * lineHeight);
+  });
 
   ctx.restore();
 }

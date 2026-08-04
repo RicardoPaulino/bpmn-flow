@@ -26,6 +26,7 @@ import {
   Magnet,
   Type,
   Plus,
+  Keyboard,
 } from 'lucide-react';
 import { exportToBpmnXml, parseBpmnXml } from '../utils/bpmnXml';
 
