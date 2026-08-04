@@ -27,6 +27,7 @@ export type BPMNConnectorType =
 
 export type RoutingStyle = 'orthogonal' | 'straight' | 'curved';
 export type LineDashStyle = 'solid' | 'dashed' | 'dotted';
+export type ResizeHandleType = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
 export type BPMNToolType =
   | 'select'

@@ -28,6 +28,7 @@ import {
   MoveRight,
   MoveDown,
   Wand2,
+  Maximize2,
   Compass,
   ArrowUp,
   ArrowRight,
@@ -76,6 +77,39 @@ export function SidebarPropertyPanel() {
 
     const updated = { ...diagram, nodes: updatedNodes, lastModified: Date.now() };
     setDiagram(updated);
+  };
+
+  const handleNodeBoundsUpdate = (newBounds: Partial<{ x: number; y: number; width: number; height: number }>) => {
+    if (!selectedNode) return;
+    const isEventOrGateway = selectedNode.type.includes('EVENT') || selectedNode.type.includes('GATEWAY');
+    const minW = isEventOrGateway ? 30 : 40;
+    const minH = isEventOrGateway ? 30 : 40;
+
+    const bounds = {
+      ...selectedNode.bounds,
+      ...newBounds,
+    };
+    bounds.width = Math.max(minW, bounds.width);
+    bounds.height = Math.max(minH, bounds.height);
+
+    const updatedNodes = diagram.nodes.map((n) => (n.id === selectedNode.id ? { ...n, bounds } : n));
+    const nodeMap = new Map(updatedNodes.map((n) => [n.id, n]));
+
+    const updatedEdges = diagram.edges.map((edge) => {
+      const src = nodeMap.get(edge.sourceRef);
+      const tgt = nodeMap.get(edge.targetRef);
+      if (src && tgt) {
+        return {
+          ...edge,
+          waypoints: calculateEdgeWaypoints(src, tgt, edge.sourceAnchor, edge.targetAnchor, edge.routingStyle || 'orthogonal'),
+        };
+      }
+      return edge;
+    });
+
+    const updated = { ...diagram, nodes: updatedNodes, edges: updatedEdges, lastModified: Date.now() };
+    setDiagram(updated);
+    pushHistory(updated);
   };
 
   const handleEdgeUpdate = (fields: Partial<typeof selectedEdge>) => {
@@ -424,6 +458,69 @@ export function SidebarPropertyPanel() {
                 onChange={(e) => handleNodeUpdate({ label: e.target.value })}
                 className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+            </div>
+
+            {/* Size & Dimensions (Resize) */}
+            <div className="p-2.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                <span className="flex items-center space-x-1.5">
+                  <Maximize2 className="w-3.5 h-3.5 text-blue-500" />
+                  <span>Size & Dimensions</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {Math.round(selectedNode.bounds.width)} × {Math.round(selectedNode.bounds.height)} px
+                </span>
+              </label>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-0.5">Width (px)</label>
+                  <input
+                    type="number"
+                    min={selectedNode.type.includes('EVENT') || selectedNode.type.includes('GATEWAY') ? 30 : 40}
+                    step={10}
+                    value={Math.round(selectedNode.bounds.width)}
+                    onChange={(e) => handleNodeBoundsUpdate({ width: Number(e.target.value) })}
+                    className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-0.5">Height (px)</label>
+                  <input
+                    type="number"
+                    min={selectedNode.type.includes('EVENT') || selectedNode.type.includes('GATEWAY') ? 30 : 40}
+                    step={10}
+                    value={Math.round(selectedNode.bounds.height)}
+                    onChange={(e) => handleNodeBoundsUpdate({ height: Number(e.target.value) })}
+                    className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60 dark:border-slate-800/60">
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-0.5">Position X</label>
+                  <input
+                    type="number"
+                    step={10}
+                    value={Math.round(selectedNode.bounds.x)}
+                    onChange={(e) => handleNodeBoundsUpdate({ x: Number(e.target.value) })}
+                    className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-0.5">Position Y</label>
+                  <input
+                    type="number"
+                    step={10}
+                    value={Math.round(selectedNode.bounds.y)}
+                    onChange={(e) => handleNodeBoundsUpdate({ y: Number(e.target.value) })}
+                    className="w-full px-2.5 py-1 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Event Definition Config (for Events) */}

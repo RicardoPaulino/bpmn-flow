@@ -36,8 +36,16 @@ export function CanvasArea() {
   const [showGrid] = useAtom(showGridAtom);
   const [handDrawnFont] = useAtom(handDrawnFontAtom);
 
-  const { handleMouseDown, handleMouseMove, handleMouseUp, hoveredNodeId, hoveredAnchor, cursorStyle } =
-    useCanvasInteraction(canvasRef);
+  const {
+    handleMouseDown,
+    handleMouseMove,
+    handleMouseUp,
+    hoveredNodeId,
+    hoveredAnchor,
+    hoveredResizeHandle,
+    isResizingNode,
+    cursorStyle,
+  } = useCanvasInteraction(canvasRef);
 
   // ResizeObserver for dynamic full-screen responsiveness
   useEffect(() => {
@@ -90,7 +98,9 @@ export function CanvasArea() {
       remoteUsers,
       theme,
       showGrid,
-      handDrawnFont
+      handDrawnFont,
+      hoveredResizeHandle,
+      isResizingNode
     );
   }, [
     diagram,
@@ -99,6 +109,8 @@ export function CanvasArea() {
     selectedEdgeIds,
     hoveredNodeId,
     hoveredAnchor,
+    hoveredResizeHandle,
+    isResizingNode,
     connectionDraft,
     selectionBox,
     alignmentGuides,

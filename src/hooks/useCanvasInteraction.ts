@@ -16,9 +16,10 @@ import {
   activeFillColorAtom,
   selectionBoxAtom,
 } from '../store/atoms';
-import { BPMNNode, SequenceFlow, Waypoint, AlignmentGuide, BPMNElementType, SelectionBox } from '../types/bpmn';
+import { BPMNNode, SequenceFlow, Waypoint, AlignmentGuide, BPMNElementType, SelectionBox, ResizeHandleType } from '../types/bpmn';
 import { getAnchorPositions } from '../canvas/bpmnDrawers';
 import { calculateEdgeWaypoints, getBestAnchors } from '../utils/bpmnRouting';
+import { getResizeHandleAtPoint } from '../canvas/renderer';
 
 export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElement | null>) {
   const [diagram, setDiagram] = useAtom(diagramAtom);
@@ -39,7 +40,9 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
 
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [hoveredAnchor, setHoveredAnchor] = useState<'top' | 'right' | 'bottom' | 'left' | null>(null);
+  const [hoveredResizeHandle, setHoveredResizeHandle] = useState<ResizeHandleType | null>(null);
   const [isDraggingNode, setIsDraggingNode] = useState(false);
+  const [isResizingNode, setIsResizingNode] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [isSelectingBox, setIsSelectingBox] = useState(false);
 
@@ -47,6 +50,8 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const selectionStartPtRef = useRef<Waypoint | null>(null);
   const initialNodePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const resizeHandleRef = useRef<ResizeHandleType | null>(null);
+  const initialResizeBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   // Push State to History
   const pushHistory = useCallback(
@@ -157,6 +162,21 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
           currentPoint: worldPt,
         });
         return;
+      }
+
+      // 3.5. Resize Handle Click -> Start Resizing Node
+      if (selectedNodeIds.length === 1) {
+        const selectedNode = diagram.nodes.find((n) => n.id === selectedNodeIds[0]);
+        if (selectedNode) {
+          const handleType = getResizeHandleAtPoint(worldPt, selectedNode.bounds, transform.zoom);
+          if (handleType) {
+            setIsResizingNode(true);
+            resizeHandleRef.current = handleType;
+            initialResizeBoundsRef.current = { ...selectedNode.bounds };
+            dragStartRef.current = worldPt;
+            return;
+          }
+        }
       }
 
       // 4. Clicked Node Selection & Drag Setup
@@ -299,6 +319,78 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
         return;
       }
 
+      // 3.5. Dragging Resize Handle
+      if (isResizingNode && resizeHandleRef.current && initialResizeBoundsRef.current && selectedNodeIds.length === 1) {
+        const handle = resizeHandleRef.current;
+        const initBounds = initialResizeBoundsRef.current;
+        const targetNode = diagram.nodes.find((n) => n.id === selectedNodeIds[0]);
+        if (!targetNode) return;
+
+        const isEventOrGateway = targetNode.type.includes('EVENT') || targetNode.type.includes('GATEWAY');
+        const minW = isEventOrGateway ? 30 : 50;
+        const minH = isEventOrGateway ? 30 : 40;
+
+        const dx = worldPt.x - dragStartRef.current.x;
+        const dy = worldPt.y - dragStartRef.current.y;
+
+        const rightEdge = initBounds.x + initBounds.width;
+        const bottomEdge = initBounds.y + initBounds.height;
+
+        let newX = initBounds.x;
+        let newY = initBounds.y;
+        let newW = initBounds.width;
+        let newH = initBounds.height;
+
+        // Horizontal sizing
+        if (handle.includes('e')) {
+          const rawW = initBounds.width + dx;
+          newW = Math.max(minW, snapGrid ? snapToGridVal(rawW) : rawW);
+          newX = initBounds.x;
+        } else if (handle.includes('w')) {
+          const rawX = initBounds.x + dx;
+          const constrainedX = Math.min(rawX, rightEdge - minW);
+          newX = snapGrid ? snapToGridVal(constrainedX) : constrainedX;
+          newW = rightEdge - newX;
+        }
+
+        // Vertical sizing
+        if (handle.includes('s')) {
+          const rawH = initBounds.height + dy;
+          newH = Math.max(minH, snapGrid ? snapToGridVal(rawH) : rawH);
+          newY = initBounds.y;
+        } else if (handle.includes('n')) {
+          const rawY = initBounds.y + dy;
+          const constrainedY = Math.min(rawY, bottomEdge - minH);
+          newY = snapGrid ? snapToGridVal(constrainedY) : constrainedY;
+          newH = bottomEdge - newY;
+        }
+
+        const updatedNodes = diagram.nodes.map((node) => {
+          if (node.id === targetNode.id) {
+            return {
+              ...node,
+              bounds: {
+                x: newX,
+                y: newY,
+                width: newW,
+                height: newH,
+              },
+            };
+          }
+          return node;
+        });
+
+        const updatedEdges = updateConnectedWaypoints(diagram.edges, updatedNodes);
+
+        setDiagram((prev) => ({
+          ...prev,
+          nodes: updatedNodes,
+          edges: updatedEdges,
+        }));
+
+        return;
+      }
+
       // 4. Dragging Selected Nodes
       if (isDraggingNode && initialNodePositionsRef.current.size > 0) {
         const dx = worldPt.x - dragStartRef.current.x;
@@ -342,7 +434,25 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
       }
 
 
-      // 4. Hover Detection over Nodes and Anchor Points
+      // 4. Hover Detection over Selected Node Resize Handles
+      if (selectedNodeIds.length === 1 && !isDraggingNode && !connectionDraft && !isSelectingBox && !isResizingNode) {
+        const selectedNode = diagram.nodes.find((n) => n.id === selectedNodeIds[0]);
+        if (selectedNode) {
+          const handleType = getResizeHandleAtPoint(worldPt, selectedNode.bounds, transform.zoom);
+          setHoveredResizeHandle(handleType);
+          if (handleType) {
+            setHoveredNodeId(null);
+            setHoveredAnchor(null);
+            return;
+          }
+        } else {
+          setHoveredResizeHandle(null);
+        }
+      } else {
+        setHoveredResizeHandle(null);
+      }
+
+      // Hover Detection over Nodes and Anchor Points
       const hovered = [...diagram.nodes].reverse().find((n) => isPointInBounds(worldPt, n.bounds));
       if (hovered) {
         setHoveredNodeId(hovered.id);
@@ -371,7 +481,9 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
       connectionDraft,
       diagram,
       isDraggingNode,
+      isResizingNode,
       isPanning,
+      isSelectingBox,
       screenToWorld,
       selectedNodeIds,
       setAlignmentGuides,
@@ -380,6 +492,7 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
       setTransform,
       snapGrid,
       snapToGridVal,
+      transform.zoom,
     ]
   );
 
@@ -399,6 +512,13 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
       setIsDraggingNode(false);
       initialNodePositionsRef.current.clear();
       setAlignmentGuides([]);
+      pushHistory(diagram);
+    }
+
+    if (isResizingNode) {
+      setIsResizingNode(false);
+      resizeHandleRef.current = null;
+      initialResizeBoundsRef.current = null;
       pushHistory(diagram);
     }
 
@@ -490,7 +610,7 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
 
   // Global window listeners so dragging nodes/panning/selection never gets stuck if cursor moves outside canvas
   useEffect(() => {
-    if (!isDraggingNode && !isPanning && !connectionDraft && !isSelectingBox) return;
+    if (!isDraggingNode && !isPanning && !connectionDraft && !isSelectingBox && !isResizingNode) return;
 
     const onWindowMouseMove = (e: MouseEvent) => {
       const syntheticEvent = {
@@ -512,13 +632,19 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
       window.removeEventListener('mousemove', onWindowMouseMove);
       window.removeEventListener('mouseup', onWindowMouseUp);
     };
-  }, [isDraggingNode, isPanning, connectionDraft, isSelectingBox, handleMouseMove, handleMouseUp]);
+  }, [isDraggingNode, isPanning, connectionDraft, isSelectingBox, isResizingNode, handleMouseMove, handleMouseUp]);
 
 
   // Dynamic cursor calculation
   let cursorStyle = 'cursor-default';
   if (isPanning || activeTool === 'hand') {
     cursorStyle = isPanning ? 'cursor-grabbing' : 'cursor-grab';
+  } else if (isResizingNode || hoveredResizeHandle) {
+    const handle = hoveredResizeHandle || resizeHandleRef.current;
+    if (handle === 'nw' || handle === 'se') cursorStyle = 'cursor-nwse-resize';
+    else if (handle === 'ne' || handle === 'sw') cursorStyle = 'cursor-nesw-resize';
+    else if (handle === 'n' || handle === 's') cursorStyle = 'cursor-ns-resize';
+    else if (handle === 'e' || handle === 'w') cursorStyle = 'cursor-ew-resize';
   } else if (isDraggingNode) {
     cursorStyle = 'cursor-grabbing';
   } else if (hoveredAnchor) {
@@ -537,7 +663,9 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
     handleMouseUp,
     hoveredNodeId,
     hoveredAnchor,
+    hoveredResizeHandle,
     isDraggingNode,
+    isResizingNode,
     cursorStyle,
   };
 }

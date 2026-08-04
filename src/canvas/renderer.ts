@@ -8,6 +8,7 @@ import {
   RemoteUser,
   BPMNNode,
   SelectionBox,
+  ResizeHandleType,
 } from '../types/bpmn';
 import { drawNode, drawEdge, drawAnchorPoints, getAnchorPositions } from './bpmnDrawers';
 
@@ -27,7 +28,9 @@ export function renderMasterCanvas(
   remoteUsers: RemoteUser[],
   theme: CanvasTheme,
   showGrid: boolean,
-  handDrawnFont: boolean
+  handDrawnFont: boolean,
+  hoveredResizeHandle?: ResizeHandleType | null,
+  isResizingNode?: boolean
 ) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -103,7 +106,7 @@ export function renderMasterCanvas(
   if (selectedNodeIds.length === 1) {
     const selectedNode = diagram.nodes.find((n) => n.id === selectedNodeIds[0]);
     if (selectedNode) {
-      drawSelectionHandles(ctx, selectedNode.bounds);
+      drawSelectionHandles(ctx, selectedNode.bounds, hoveredResizeHandle, isResizingNode);
     }
   } else if (selectedNodeIds.length > 1) {
     // Multi-select bounding box
@@ -199,30 +202,94 @@ function drawCanvasGrid(
   ctx.restore();
 }
 
-function drawSelectionHandles(ctx: CanvasRenderingContext2D, bounds: BPMNNode['bounds']) {
-  const { x, y, width, height } = bounds;
-  const handleSize = 7;
+export interface ResizeHandleInfo {
+  type: ResizeHandleType;
+  x: number;
+  y: number;
+}
 
-  const handles = [
-    { x: x - handleSize / 2, y: y - handleSize / 2 },
-    { x: x + width / 2 - handleSize / 2, y: y - handleSize / 2 },
-    { x: x + width - handleSize / 2, y: y - handleSize / 2 },
-    { x: x + width - handleSize / 2, y: y + height / 2 - handleSize / 2 },
-    { x: x + width - handleSize / 2, y: y + height - handleSize / 2 },
-    { x: x + width / 2 - handleSize / 2, y: y + height - handleSize / 2 },
-    { x: x - handleSize / 2, y: y + height - handleSize / 2 },
-    { x: x - handleSize / 2, y: y + height / 2 - handleSize / 2 },
+export function getResizeHandles(bounds: { x: number; y: number; width: number; height: number }): ResizeHandleInfo[] {
+  const { x, y, width, height } = bounds;
+  return [
+    { type: 'nw', x, y },
+    { type: 'n',  x: x + width / 2, y },
+    { type: 'ne', x: x + width, y },
+    { type: 'e',  x: x + width, y: y + height / 2 },
+    { type: 'se', x: x + width, y: y + height },
+    { type: 's',  x: x + width / 2, y: y + height },
+    { type: 'sw', x, y: y + height },
+    { type: 'w',  x, y: y + height / 2 },
   ];
+}
+
+export function getResizeHandleAtPoint(
+  worldPt: { x: number; y: number },
+  bounds: { x: number; y: number; width: number; height: number },
+  zoom: number
+): ResizeHandleType | null {
+  const handles = getResizeHandles(bounds);
+  const threshold = Math.max(8, 10 / zoom);
+
+  for (const h of handles) {
+    if (Math.abs(worldPt.x - h.x) <= threshold && Math.abs(worldPt.y - h.y) <= threshold) {
+      return h.type;
+    }
+  }
+
+  return null;
+}
+
+function drawSelectionHandles(
+  ctx: CanvasRenderingContext2D,
+  bounds: BPMNNode['bounds'],
+  activeHandle?: ResizeHandleType | null,
+  isResizing?: boolean
+) {
+  const { x, y, width, height } = bounds;
+  const handleSize = 8;
 
   ctx.save();
-  ctx.fillStyle = '#ffffff';
+
+  // Highlight bounding outline
   ctx.strokeStyle = '#2563eb';
   ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  ctx.strokeRect(x, y, width, height);
+
+  // Render 8 handles
+  const handles = getResizeHandles(bounds);
 
   handles.forEach((h) => {
-    ctx.fillRect(h.x, h.y, handleSize, handleSize);
-    ctx.strokeRect(h.x, h.y, handleSize, handleSize);
+    const isHovered = activeHandle === h.type;
+    const size = isHovered ? handleSize + 3 : handleSize;
+
+    ctx.fillStyle = isHovered ? '#2563eb' : '#ffffff';
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+
+    ctx.fillRect(h.x - size / 2, h.y - size / 2, size, size);
+    ctx.strokeRect(h.x - size / 2, h.y - size / 2, size, size);
   });
+
+  // If actively resizing, render dimension badge tooltip
+  if (isResizing) {
+    const badgeText = `${Math.round(width)} × ${Math.round(height)} px`;
+    ctx.font = '600 11px system-ui, sans-serif';
+    const textWidth = ctx.measureText(badgeText).width;
+    const badgeW = textWidth + 12;
+    const badgeH = 20;
+    const badgeX = x + width / 2 - badgeW / 2;
+    const badgeY = y + height + 10;
+
+    ctx.fillStyle = '#0f172a';
+    ctx.beginPath();
+    ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(badgeText, badgeX + 6, badgeY + 14);
+  }
 
   ctx.restore();
 }
