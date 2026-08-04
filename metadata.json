@@ -1,0 +1,6 @@
+{
+  "name": "BPMN Canvas",
+  "description": "Minimalist hand-drawn BPMN 2.0 modeling tool powered by HTML5 Canvas, Rough.js, Jotai, and E2EE realtime collaboration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
