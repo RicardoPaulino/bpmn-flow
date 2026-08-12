@@ -144,7 +144,33 @@ export function drawNode(
   drawNodeText(ctx, node.label, x, y, width, height, node.type, handDrawnFont, theme);
 
   // Hover or Active Glow
-  if (isHovered && !isSelected) {
+  if (isHighlighted) {
+    ctx.save();
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#10b981';
+    ctx.shadowBlur = 8;
+    ctx.strokeRect(x - 2, y - 2, width + 4, height + 4);
+
+    // Active Execution Badge Indicator (smaller & subtle)
+    const badgeX = x + width - 3;
+    const badgeY = y - 3;
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, 7, 0, Math.PI * 2);
+    ctx.fillStyle = '#10b981';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 8px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⚡', badgeX, badgeY);
+
+    ctx.restore();
+  } else if (isHovered && !isSelected) {
     ctx.strokeStyle = '#3b82f6';
     ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 4]);
@@ -153,19 +179,57 @@ export function drawNode(
   }
 }
 
+export function getPointAlongWaypoints(waypoints: Waypoint[], progress: number): Waypoint {
+  if (!waypoints || waypoints.length === 0) return { x: 0, y: 0 };
+  if (waypoints.length === 1) return waypoints[0];
+
+  const segmentLengths: number[] = [];
+  let totalLength = 0;
+
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const dx = waypoints[i + 1].x - waypoints[i].x;
+    const dy = waypoints[i + 1].y - waypoints[i].y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    segmentLengths.push(len);
+    totalLength += len;
+  }
+
+  if (totalLength === 0) return waypoints[0];
+
+  const targetDist = Math.max(0, Math.min(1, progress)) * totalLength;
+  let accumulated = 0;
+
+  for (let i = 0; i < segmentLengths.length; i++) {
+    const segLen = segmentLengths[i];
+    if (accumulated + segLen >= targetDist || i === segmentLengths.length - 1) {
+      const segProgress = segLen > 0 ? (targetDist - accumulated) / segLen : 0;
+      const p1 = waypoints[i];
+      const p2 = waypoints[i + 1];
+      return {
+        x: p1.x + (p2.x - p1.x) * segProgress,
+        y: p1.y + (p2.y - p1.y) * segProgress,
+      };
+    }
+    accumulated += segLen;
+  }
+
+  return waypoints[waypoints.length - 1];
+}
+
 export function drawEdge(
   rc: RoughCanvas,
   ctx: CanvasRenderingContext2D,
   edge: SequenceFlow,
   isSelected: boolean,
   isHighlighted: boolean,
-  handDrawnFont: boolean
+  handDrawnFont: boolean,
+  animatingToken?: { edgeId: string; progress: number } | null
 ) {
   const waypoints = edge.waypoints;
   if (!waypoints || waypoints.length < 2) return;
 
   const strokeColor = isHighlighted ? '#10b981' : isSelected ? '#2563eb' : edge.roughStyle.stroke;
-  const strokeWidth = isHighlighted ? 3.5 : isSelected ? edge.roughStyle.strokeWidth + 1 : edge.roughStyle.strokeWidth;
+  const strokeWidth = isHighlighted ? 2.5 : isSelected ? edge.roughStyle.strokeWidth + 1 : edge.roughStyle.strokeWidth;
 
   const pathPoints: [number, number][] = waypoints.map((wp) => [wp.x, wp.y]);
 
@@ -195,6 +259,34 @@ export function drawEdge(
   const last = waypoints[waypoints.length - 1];
   const secondLast = waypoints[waypoints.length - 2] || waypoints[0];
   drawArrowhead(rc, ctx, secondLast, last, strokeColor, edge.type);
+
+  // Render Traveling Animated Execution Token Particle along path (smaller & subtle)
+  if (animatingToken && animatingToken.edgeId === edge.id) {
+    const tokenPt = getPointAlongWaypoints(waypoints, animatingToken.progress);
+
+    ctx.save();
+    // Outer glowing aura
+    ctx.beginPath();
+    ctx.arc(tokenPt.x, tokenPt.y, 8, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.3)';
+    ctx.fill();
+
+    // Pulse ring
+    ctx.beginPath();
+    ctx.arc(tokenPt.x, tokenPt.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#10b981';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.fill();
+    ctx.stroke();
+
+    // Center white dot
+    ctx.beginPath();
+    ctx.arc(tokenPt.x, tokenPt.y, 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.restore();
+  }
 
   // If selected, draw anchor connection handles on ends
   if (isSelected) {

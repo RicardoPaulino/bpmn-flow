@@ -7,19 +7,22 @@ import {
   selectedEdgeIdsAtom,
   historyStackAtom,
   historyIndexAtom,
+  currentViewAtom,
 } from './store/atoms';
 import { HeaderNav } from './components/HeaderNav';
+import { HomeScreen } from './components/HomeScreen';
 import { TopToolbar } from './components/TopToolbar';
 import { CanvasArea } from './components/CanvasArea';
 import { SidebarPropertyPanel } from './components/SidebarPropertyPanel';
 import { ProcessSimulatorModal } from './components/ProcessSimulatorModal';
-import { AiAssistantModal } from './components/AiAssistantModal';
 import { CollaborateModal } from './components/CollaborateModal';
 import { ExportModal } from './components/ExportModal';
 import { DiagramsListModal } from './components/DiagramsListModal';
+import { ShortcutsModal } from './components/ShortcutsModal';
 
 export default function App() {
   const [activeModal] = useAtom(activeModalAtom);
+  const [currentView] = useAtom(currentViewAtom);
   const [diagram, setDiagram] = useAtom(diagramAtom);
   const [selectedNodeIds, setSelectedNodeIds] = useAtom(selectedNodeIdsAtom);
   const [selectedEdgeIds, setSelectedEdgeIds] = useAtom(selectedEdgeIdsAtom);
@@ -110,24 +113,30 @@ export default function App() {
       {/* Top Header Navigation */}
       <HeaderNav />
 
-      {/* Main Canvas Workspace */}
-      <main className="flex-1 relative w-full h-full overflow-hidden">
-        {/* Floating Tool Palette */}
-        <TopToolbar />
+      {/* Main Content Area: Home Hub or Canvas Workspace */}
+      <main className="flex-1 relative w-full h-full overflow-hidden flex flex-col">
+        {currentView === 'home' ? (
+          <HomeScreen />
+        ) : (
+          <div className="relative w-full h-full overflow-hidden flex-1">
+            {/* Floating Tool Palette */}
+            <TopToolbar />
 
-        {/* HTML5 Canvas Engine */}
-        <CanvasArea />
+            {/* HTML5 Canvas Engine */}
+            <CanvasArea />
 
-        {/* Contextual Properties Drawer */}
-        <SidebarPropertyPanel />
+            {/* Contextual Properties Drawer */}
+            <SidebarPropertyPanel />
+          </div>
+        )}
       </main>
 
       {/* Modals Overlay */}
       {activeModal === 'simulation' && <ProcessSimulatorModal />}
-      {activeModal === 'ai_assistant' && <AiAssistantModal />}
       {activeModal === 'collaborate' && <CollaborateModal />}
       {activeModal === 'export' && <ExportModal />}
       {activeModal === 'diagrams' && <DiagramsListModal />}
+      {activeModal === 'shortcuts' && <ShortcutsModal />}
     </div>
   );
 }

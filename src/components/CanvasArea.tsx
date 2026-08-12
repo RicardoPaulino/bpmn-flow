@@ -8,6 +8,8 @@ import {
   connectionDraftAtom,
   alignmentGuidesAtom,
   simulationStateAtom,
+  simulationTokenAnimAtom,
+  autoFocusSimulationAtom,
   remoteUsersAtom,
   canvasThemeAtom,
   showGridAtom,
@@ -31,6 +33,8 @@ export function CanvasArea() {
   const [selectionBox] = useAtom(selectionBoxAtom);
   const [alignmentGuides] = useAtom(alignmentGuidesAtom);
   const [simulationState] = useAtom(simulationStateAtom);
+  const [simulationTokenAnim] = useAtom(simulationTokenAnimAtom);
+  const [autoFocus] = useAtom(autoFocusSimulationAtom);
   const [remoteUsers] = useAtom(remoteUsersAtom);
   const [theme] = useAtom(canvasThemeAtom);
   const [showGrid] = useAtom(showGridAtom);
@@ -46,6 +50,29 @@ export function CanvasArea() {
     isResizingNode,
     cursorStyle,
   } = useCanvasInteraction(canvasRef);
+
+  // Auto-Focus camera on active simulation node
+  useEffect(() => {
+    if (!simulationState?.currentNodeId || !autoFocus) return;
+    const targetNode = diagram.nodes.find((n) => n.id === simulationState.currentNodeId);
+    const container = containerRef.current;
+    if (!targetNode || !container) return;
+
+    const width = container.clientWidth || window.innerWidth;
+    const height = container.clientHeight || window.innerHeight;
+
+    const nodeCenterX = targetNode.bounds.x + targetNode.bounds.width / 2;
+    const nodeCenterY = targetNode.bounds.y + targetNode.bounds.height / 2;
+
+    const desiredPanX = width / 2 - nodeCenterX * transform.zoom;
+    const desiredPanY = height / 2 - nodeCenterY * transform.zoom;
+
+    setTransform((prev) => ({
+      ...prev,
+      panX: desiredPanX,
+      panY: desiredPanY,
+    }));
+  }, [simulationState?.currentNodeId, autoFocus]);
 
   // ResizeObserver for dynamic full-screen responsiveness
   useEffect(() => {
@@ -74,34 +101,50 @@ export function CanvasArea() {
     return () => observer.disconnect();
   }, []);
 
-  // Main Render Loop Effect
+  // Main Render Loop Effect with requestAnimationFrame support for token animations
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const activeSimNodeId = simulationState?.currentNodeId || null;
-    const activeSimEdgeIds = simulationState?.activePathEdgeIds || [];
+    let animId: number;
 
-    renderMasterCanvas(
-      canvas,
-      diagram,
-      transform,
-      selectedNodeIds,
-      selectedEdgeIds,
-      hoveredNodeId,
-      hoveredAnchor,
-      connectionDraft,
-      selectionBox,
-      alignmentGuides,
-      activeSimNodeId,
-      activeSimEdgeIds,
-      remoteUsers,
-      theme,
-      showGrid,
-      handDrawnFont,
-      hoveredResizeHandle,
-      isResizingNode
-    );
+    const render = () => {
+      const activeSimNodeId = simulationState?.currentNodeId || null;
+      const activeSimEdgeIds = simulationState?.activePathEdgeIds || [];
+
+      renderMasterCanvas(
+        canvas,
+        diagram,
+        transform,
+        selectedNodeIds,
+        selectedEdgeIds,
+        hoveredNodeId,
+        hoveredAnchor,
+        connectionDraft,
+        selectionBox,
+        alignmentGuides,
+        activeSimNodeId,
+        activeSimEdgeIds,
+        remoteUsers,
+        theme,
+        showGrid,
+        handDrawnFont,
+        hoveredResizeHandle,
+        isResizingNode,
+        simulationTokenAnim
+      );
+
+      // If token is animating or simulation is running, keep requestAnimationFrame loop active for continuous smooth pulse
+      if (simulationTokenAnim || simulationState?.status === 'running') {
+        animId = requestAnimationFrame(render);
+      }
+    };
+
+    render();
+
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+    };
   }, [
     diagram,
     transform,
@@ -115,6 +158,7 @@ export function CanvasArea() {
     selectionBox,
     alignmentGuides,
     simulationState,
+    simulationTokenAnim,
     remoteUsers,
     theme,
     showGrid,

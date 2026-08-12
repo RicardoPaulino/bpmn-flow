@@ -54,7 +54,13 @@ export const connectionDraftAtom = atom<ConnectionDraft | null>(null as Connecti
 export const alignmentGuidesAtom = atom<AlignmentGuide[]>([]);
 
 // Interactive Process Simulator State
+export interface TokenAnimationState {
+  edgeId: string;
+  progress: number;
+}
 export const simulationStateAtom = atom<SimulationStep | null>(null as SimulationStep | null);
+export const simulationTokenAnimAtom = atom<TokenAnimationState | null>(null as TokenAnimationState | null);
+export const autoFocusSimulationAtom = atom<boolean>(true);
 
 // Collaboration & E2EE State
 export const isCollaboratingAtom = atom<boolean>(false);
@@ -62,7 +68,11 @@ export const roomIdAtom = atom<string | null>(null as string | null);
 export const encryptionKeyAtom = atom<string | null>(null as string | null);
 export const remoteUsersAtom = atom<RemoteUser[]>([]);
 
-export type ModalType = 'diagrams' | 'ai_assistant' | 'simulation' | 'collaborate' | 'export' | 'shortcuts' | null;
+export type ModalType = 'diagrams' | 'simulation' | 'collaborate' | 'export' | 'shortcuts' | null;
+
+// Navigation & Active View State
+export type ViewType = 'home' | 'canvas';
+export const currentViewAtom = atom<ViewType>('home');
 
 // Active Modals
 export const activeModalAtom = atom<ModalType>(null as ModalType);

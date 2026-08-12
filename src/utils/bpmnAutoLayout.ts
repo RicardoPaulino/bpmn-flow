@@ -1,4 +1,4 @@
-import { DiagramData, BPMNNode, SequenceFlow } from '../types/bpmn';
+import { DiagramData, BPMNNode } from '../types/bpmn';
 import { calculateEdgeWaypoints, getBestAnchors } from './bpmnRouting';
 
 export interface AutoLayoutOptions {
@@ -9,14 +9,14 @@ export interface AutoLayoutOptions {
 }
 
 /**
- * Automatically calculates positions for nodes in a clear flow layout
- * and updates edge waypoints & anchors.
+ * Automatically rearranges nodes and edges in a clear flow layout
+ * using topological longest-path ranking and barycenter cross reduction.
  */
 export function applyAutoLayout(
   diagram: DiagramData,
   options: AutoLayoutOptions
 ): DiagramData {
-  const { direction, nodeIdsToLayout, hSpacing = 80, vSpacing = 60 } = options;
+  const { direction, nodeIdsToLayout, hSpacing = 110, vSpacing = 70 } = options;
 
   // Determine which nodes to layout
   const targetNodeIds =
@@ -35,100 +35,143 @@ export function applyAutoLayout(
     (e) => nodeMap.has(e.sourceRef) && nodeMap.has(e.targetRef)
   );
 
-  // Compute in-degree & out-neighbors
-  const inDegree = new Map<string, number>();
-  const outEdges = new Map<string, string[]>();
+  // Build adjacency list
+  const inEdgesMap = new Map<string, string[]>();
+  const outEdgesMap = new Map<string, string[]>();
 
   targetNodeIds.forEach((id) => {
-    inDegree.set(id, 0);
-    outEdges.set(id, []);
+    inEdgesMap.set(id, []);
+    outEdgesMap.set(id, []);
   });
 
   relevantEdges.forEach((e) => {
-    inDegree.set(e.targetRef, (inDegree.get(e.targetRef) || 0) + 1);
-    outEdges.get(e.sourceRef)?.push(e.targetRef);
+    outEdgesMap.get(e.sourceRef)?.push(e.targetRef);
+    inEdgesMap.get(e.targetRef)?.push(e.sourceRef);
   });
 
-  // Assign ranks using BFS / topological topological ordering
+  // 1. Assign Ranks using Longest-Path Layering
   const ranks = new Map<string, number>();
-  const queue: string[] = [];
 
-  // Roots (in-degree 0)
-  targetNodeIds.forEach((id) => {
-    if (inDegree.get(id) === 0) {
-      ranks.set(id, 0);
-      queue.push(id);
-    }
-  });
+  // Find root nodes (in-degree 0)
+  const roots = targetNodeIds.filter((id) => (inEdgesMap.get(id) || []).length === 0);
 
-  // If no root found (e.g. fully cyclic graph), pick node with min X or Y as start
-  if (queue.length === 0 && targetNodeIds.length > 0) {
-    const sortedByPos = [...targetNodeIds].sort((a, b) => {
+  if (roots.length === 0 && targetNodeIds.length > 0) {
+    // If cyclic, pick node with smallest X/Y coordinate as root
+    const sorted = [...targetNodeIds].sort((a, b) => {
       const na = nodeMap.get(a)!;
       const nb = nodeMap.get(b)!;
       return direction === 'horizontal' ? na.bounds.x - nb.bounds.x : na.bounds.y - nb.bounds.y;
     });
-    const startId = sortedByPos[0];
-    ranks.set(startId, 0);
-    queue.push(startId);
+    roots.push(sorted[0]);
   }
 
-  const visited = new Set<string>();
+  // Topological rank relaxation
+  const memoRank = (nodeId: string, visited: Set<string>): number => {
+    if (ranks.has(nodeId)) return ranks.get(nodeId)!;
+    if (visited.has(nodeId)) return 0; // Break cycles
 
-  while (queue.length > 0) {
-    const curr = queue.shift()!;
-    if (visited.has(curr)) continue;
-    visited.add(curr);
+    visited.add(nodeId);
+    const inNeighbors = inEdgesMap.get(nodeId) || [];
 
-    const currRank = ranks.get(curr) || 0;
-    const neighbors = outEdges.get(curr) || [];
-
-    neighbors.forEach((nbr) => {
-      const existingRank = ranks.get(nbr) ?? -1;
-      const nextRank = Math.max(existingRank, currRank + 1);
-      ranks.set(nbr, nextRank);
-      queue.push(nbr);
-    });
-  }
-
-  // Assign rank 0 to any remaining unvisited disconnected nodes
-  targetNodeIds.forEach((id) => {
-    if (!ranks.has(id)) {
-      ranks.set(id, 0);
+    if (inNeighbors.length === 0) {
+      ranks.set(nodeId, 0);
+      return 0;
     }
+
+    let maxPredRank = -1;
+    for (const predId of inNeighbors) {
+      const predRank = memoRank(predId, new Set(visited));
+      if (predRank > maxPredRank) maxPredRank = predRank;
+    }
+
+    const calculatedRank = maxPredRank + 1;
+    ranks.set(nodeId, calculatedRank);
+    return calculatedRank;
+  };
+
+  targetNodeIds.forEach((id) => memoRank(id, new Set()));
+
+  // Ensure all nodes have a rank
+  targetNodeIds.forEach((id) => {
+    if (!ranks.has(id)) ranks.set(id, 0);
   });
 
-  // Group node IDs by rank
+  // 2. Group nodes by rank
   const rankGroups = new Map<number, string[]>();
   targetNodeIds.forEach((id) => {
     const r = ranks.get(id) || 0;
-    if (!rankGroups.has(r)) {
-      rankGroups.set(r, []);
-    }
+    if (!rankGroups.has(r)) rankGroups.set(r, []);
     rankGroups.get(r)!.push(id);
   });
 
-  // Sort ranks ascending
   const sortedRankKeys = Array.from(rankGroups.keys()).sort((a, b) => a - b);
 
-  // Find bounding box origin of the target nodes to preserve context position
+  // 3. Barycenter Sorting within Ranks (Cross Reduction)
+  sortedRankKeys.forEach((rankKey, idx) => {
+    const group = rankGroups.get(rankKey)!;
+    if (idx === 0) {
+      // Sort first rank by natural coordinate
+      group.sort((a, b) => {
+        const na = nodeMap.get(a)!;
+        const nb = nodeMap.get(b)!;
+        return direction === 'horizontal' ? na.bounds.y - nb.bounds.y : na.bounds.x - nb.bounds.x;
+      });
+    } else {
+      // Sort rank by average position of predecessor nodes in previous ranks
+      group.sort((a, b) => {
+        const getBarycenter = (id: string) => {
+          const preds = inEdgesMap.get(id) || [];
+          if (preds.length === 0) return 0;
+          let sum = 0;
+          preds.forEach((pId) => {
+            const pNode = nodeMap.get(pId)!;
+            sum += direction === 'horizontal' ? pNode.bounds.y : pNode.bounds.x;
+          });
+          return sum / preds.length;
+        };
+
+        return getBarycenter(a) - getBarycenter(b);
+      });
+    }
+  });
+
+  // 4. Calculate Origin bounding box
   const minX = Math.min(...Array.from(nodeMap.values()).map((n) => n.bounds.x));
   const minY = Math.min(...Array.from(nodeMap.values()).map((n) => n.bounds.y));
 
+  // Compute total layout dimensions per rank for vertical/horizontal centering
+  const rankDimensions = new Map<number, number>();
+  sortedRankKeys.forEach((rankKey) => {
+    const group = rankGroups.get(rankKey)!;
+    let totalDim = 0;
+    group.forEach((id, index) => {
+      const node = nodeMap.get(id)!;
+      const dim = direction === 'horizontal' ? node.bounds.height : node.bounds.width;
+      totalDim += dim;
+      if (index < group.length - 1) {
+        totalDim += direction === 'horizontal' ? vSpacing : hSpacing;
+      }
+    });
+    rankDimensions.set(rankKey, totalDim);
+  });
+
+  const maxRankDimension = Math.max(...Array.from(rankDimensions.values()), 0);
+
+  // 5. Position nodes on grid
   const updatedNodeMap = new Map<string, BPMNNode>();
 
   if (direction === 'horizontal') {
     let currentX = minX;
 
     sortedRankKeys.forEach((rankKey) => {
-      const groupNodeIds = rankGroups.get(rankKey)!;
-      // Sort group nodes by their original Y coordinate for natural ordering
-      groupNodeIds.sort((a, b) => nodeMap.get(a)!.bounds.y - nodeMap.get(b)!.bounds.y);
-
+      const group = rankGroups.get(rankKey)!;
       let maxRankWidth = 0;
-      let currentY = minY;
 
-      groupNodeIds.forEach((id) => {
+      // Center this rank column vertically relative to max rank dimension
+      const columnHeight = rankDimensions.get(rankKey) || 0;
+      let currentY = minY + (maxRankDimension - columnHeight) / 2;
+
+      group.forEach((id) => {
         const node = nodeMap.get(id)!;
         maxRankWidth = Math.max(maxRankWidth, node.bounds.width);
 
@@ -147,18 +190,18 @@ export function applyAutoLayout(
       currentX += maxRankWidth + hSpacing;
     });
   } else {
-    // Vertical Layout Flow
+    // Vertical Layout
     let currentY = minY;
 
     sortedRankKeys.forEach((rankKey) => {
-      const groupNodeIds = rankGroups.get(rankKey)!;
-      // Sort group nodes by their original X coordinate for natural ordering
-      groupNodeIds.sort((a, b) => nodeMap.get(a)!.bounds.x - nodeMap.get(b)!.bounds.x);
-
+      const group = rankGroups.get(rankKey)!;
       let maxRankHeight = 0;
-      let currentX = minX;
 
-      groupNodeIds.forEach((id) => {
+      // Center this rank row horizontally relative to max rank dimension
+      const rowWidth = rankDimensions.get(rankKey) || 0;
+      let currentX = minX + (maxRankDimension - rowWidth) / 2;
+
+      group.forEach((id) => {
         const node = nodeMap.get(id)!;
         maxRankHeight = Math.max(maxRankHeight, node.bounds.height);
 
@@ -178,19 +221,16 @@ export function applyAutoLayout(
     });
   }
 
-  // Merge back updated node positions
-  const updatedNodes = diagram.nodes.map((node) => {
-    return updatedNodeMap.get(node.id) || node;
-  });
+  // Merge updated node positions into diagram
+  const updatedNodes = diagram.nodes.map((node) => updatedNodeMap.get(node.id) || node);
 
-  // Re-calculate edge waypoints and anchors for affected connections
+  // 6. Recalculate Edge Waypoints & Anchors
   const updatedEdges = diagram.edges.map((edge) => {
     const srcNode = updatedNodes.find((n) => n.id === edge.sourceRef);
     const tgtNode = updatedNodes.find((n) => n.id === edge.targetRef);
 
     if (srcNode && tgtNode && (targetNodeIds.includes(edge.sourceRef) || targetNodeIds.includes(edge.targetRef))) {
-      const sourceAnchor: 'top' | 'right' | 'bottom' | 'left' = direction === 'horizontal' ? 'right' : 'bottom';
-      const targetAnchor: 'top' | 'right' | 'bottom' | 'left' = direction === 'horizontal' ? 'left' : 'top';
+      const { sourceAnchor, targetAnchor } = getBestAnchors(srcNode, tgtNode);
 
       const waypoints = calculateEdgeWaypoints(
         srcNode,
@@ -217,3 +257,4 @@ export function applyAutoLayout(
     lastModified: Date.now(),
   };
 }
+

@@ -39,7 +39,7 @@ import {
 export function TopToolbar() {
   const [activeTool, setActiveTool] = useAtom(activeToolAtom);
   const [transform, setTransform] = useAtom(transformAtom);
-  const [historyStack] = useAtom(historyStackAtom);
+  const [historyStack, setHistoryStack] = useAtom(historyStackAtom);
   const [historyIndex, setHistoryIndex] = useAtom(historyIndexAtom);
   const setDiagram = useSetAtom(diagramAtom);
 
@@ -53,7 +53,14 @@ export function TopToolbar() {
   const [selectedNodeIds] = useAtom(selectedNodeIdsAtom);
 
   const handleAutoLayout = (direction: 'horizontal' | 'vertical') => {
-    setDiagram((prev) => applyAutoLayout(prev, { direction, nodeIdsToLayout: selectedNodeIds }));
+    setDiagram((prev) => {
+      const updated = applyAutoLayout(prev, { direction, nodeIdsToLayout: selectedNodeIds });
+      const newStack = historyStack.slice(0, historyIndex + 1);
+      newStack.push(updated);
+      setHistoryStack(newStack);
+      setHistoryIndex(newStack.length - 1);
+      return updated;
+    });
     setAutoLayoutDropdownOpen(false);
   };
 

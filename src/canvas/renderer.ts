@@ -30,7 +30,8 @@ export function renderMasterCanvas(
   showGrid: boolean,
   handDrawnFont: boolean,
   hoveredResizeHandle?: ResizeHandleType | null,
-  isResizingNode?: boolean
+  isResizingNode?: boolean,
+  tokenAnim?: { edgeId: string; progress: number } | null
 ) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -59,7 +60,7 @@ export function renderMasterCanvas(
   diagram.edges.forEach((edge) => {
     const isSelected = selectedEdgeIds.includes(edge.id);
     const isHighlighted = simulationActiveEdgeIds.includes(edge.id);
-    drawEdge(rc, ctx, edge, isSelected, isHighlighted, handDrawnFont);
+    drawEdge(rc, ctx, edge, isSelected, isHighlighted, handDrawnFont, tokenAnim);
   });
 
   // 2. Render Connection Draft (Dragging line from an anchor)

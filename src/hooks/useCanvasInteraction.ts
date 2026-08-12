@@ -45,6 +45,45 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
   const [isResizingNode, setIsResizingNode] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [isSelectingBox, setIsSelectingBox] = useState(false);
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+
+  // Keyboard spacebar listener for panning viewport
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        (activeEl as HTMLElement)?.isContentEditable;
+
+      if (isInput) return;
+
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        setIsSpacePressed(true);
+      }
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space' || e.key === ' ') {
+        setIsSpacePressed(false);
+      }
+    };
+
+    const onBlur = () => {
+      setIsSpacePressed(false);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
 
   // Dragging / Interaction refs
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -88,8 +127,9 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
   // Handle Mouse Down
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (e.button === 1 || activeTool === 'hand') {
+      if (e.button === 1 || isSpacePressed || activeTool === 'hand') {
         // Pan Canvas
+        e.preventDefault();
         setIsPanning(true);
         dragStartRef.current = { x: e.clientX - transform.panX, y: e.clientY - transform.panY };
         return;
@@ -255,6 +295,7 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
       activeRoughness,
       activeStrokeColor,
       activeFillColor,
+      isSpacePressed,
     ]
   );
 
@@ -637,7 +678,7 @@ export function useCanvasInteraction(canvasRef: React.RefObject<HTMLCanvasElemen
 
   // Dynamic cursor calculation
   let cursorStyle = 'cursor-default';
-  if (isPanning || activeTool === 'hand') {
+  if (isPanning || activeTool === 'hand' || isSpacePressed) {
     cursorStyle = isPanning ? 'cursor-grabbing' : 'cursor-grab';
   } else if (isResizingNode || hoveredResizeHandle) {
     const handle = hoveredResizeHandle || resizeHandleRef.current;

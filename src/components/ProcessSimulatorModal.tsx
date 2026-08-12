@@ -1,39 +1,65 @@
-import React, { useState, useEffect } from 'react';
-import { useAtom, useSetAtom } from 'jotai';
+import React, { useState, useEffect, useRef } from 'react';
+import { useAtom } from 'jotai';
 import {
   diagramAtom,
   simulationStateAtom,
+  simulationTokenAnimAtom,
+  autoFocusSimulationAtom,
   activeModalAtom,
 } from '../store/atoms';
-import { Play, Pause, RotateCcw, SkipForward, X, CheckCircle2, AlertTriangle, Layers } from 'lucide-react';
+import {
+  Play,
+  Pause,
+  RotateCcw,
+  SkipForward,
+  X,
+  Terminal,
+  Focus,
+  Sliders,
+  ChevronDown,
+  ChevronUp,
+  Activity,
+  Zap,
+} from 'lucide-react';
 
 export function ProcessSimulatorModal() {
   const [diagram] = useAtom(diagramAtom);
   const [simulationState, setSimulationState] = useAtom(simulationStateAtom);
+  const [, setSimulationTokenAnim] = useAtom(simulationTokenAnimAtom);
+  const [autoFocus, setAutoFocus] = useAtom(autoFocusSimulationAtom);
   const [, setActiveModal] = useAtom(activeModalAtom);
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [speedMs, setSpeedMs] = useState<number>(1000);
+  const [showLogs, setShowLogs] = useState(false);
+  const [showVariables, setShowVariables] = useState(false);
+  const [isStepping, setIsStepping] = useState(false);
+
+  // Variable payload state for gateways
+  const [variablesText, setVariablesText] = useState('{\n  "orderAmount": 1250,\n  "creditApproved": true\n}');
 
   // Initialize Simulator on start node
   const startSimulation = () => {
     const startNode = diagram.nodes.find((n) => n.type === 'START_EVENT');
     if (!startNode) {
-      alert('No Start Event found in diagram. Add a Start Event to simulate execution.');
+      alert('Nenhum Evento de Início (Start Event) foi encontrado no diagrama. Adicione um evento de início para simular.');
       return;
     }
 
+    setSimulationTokenAnim(null);
+    setIsStepping(false);
     setSimulationState({
       currentNodeId: startNode.id,
       activePathEdgeIds: [],
       visitedNodeIds: [startNode.id],
-      logs: [`Started process execution at: ${startNode.label}`],
+      logs: [`Iniciou execução do processo em: ${startNode.label}`],
       status: 'running',
-      variableState: { orderAmount: 1250, creditScore: 720 },
+      variableState: { orderAmount: 1250, creditApproved: true },
     });
   };
 
   const stepForward = () => {
-    if (!simulationState || simulationState.status === 'completed') return;
+    if (!simulationState || simulationState.status === 'completed' || isStepping) return;
 
     const currentNode = diagram.nodes.find((n) => n.id === simulationState.currentNodeId);
     if (!currentNode) return;
@@ -48,7 +74,7 @@ export function ProcessSimulatorModal() {
           ? {
               ...prev,
               status: 'completed',
-              logs: [...prev.logs, `Completed process execution at: ${currentNode.label}`],
+              logs: [...prev.logs, `Processo finalizado com sucesso em: ${currentNode.label}`],
             }
           : null
       );
@@ -60,32 +86,70 @@ export function ProcessSimulatorModal() {
     let selectedEdge = outgoingEdges[0];
 
     if (currentNode.type === 'GATEWAY_EXCLUSIVE' && outgoingEdges.length > 1) {
-      // Exclusive gateway branch evaluation
-      const trueConditionEdge = outgoingEdges.find((e) => {
-        if (e.label?.includes('Yes') || e.conditionExpression?.includes('>=')) return true;
+      // Parse variable payload if possible
+      let parsedVars: Record<string, any> = {};
+      try {
+        parsedVars = JSON.parse(variablesText);
+      } catch (err) {
+        // fallback
+      }
+
+      // Find branch matching condition or label
+      const matchedEdge = outgoingEdges.find((e) => {
+        const label = (e.label || '').toLowerCase();
+        const expr = (e.conditionExpression || '').toLowerCase();
+
+        if (parsedVars.creditApproved === false && (label.includes('no') || label.includes('não') || label.includes('rejeitad'))) {
+          return true;
+        }
+        if (parsedVars.orderAmount >= 1000 && (label.includes('yes') || label.includes('sim') || label.includes('aprovad') || expr.includes('>='))) {
+          return true;
+        }
         return false;
       });
-      if (trueConditionEdge) selectedEdge = trueConditionEdge;
+
+      if (matchedEdge) selectedEdge = matchedEdge;
     }
 
     const nextNode = diagram.nodes.find((n) => n.id === selectedEdge.targetRef);
     if (!nextNode) return;
 
-    setSimulationState((prev) =>
-      prev
-        ? {
-            ...prev,
-            currentNodeId: nextNode.id,
-            activePathEdgeIds: [...prev.activePathEdgeIds, selectedEdge.id],
-            visitedNodeIds: [...prev.visitedNodeIds, nextNode.id],
-            logs: [
-              ...prev.logs,
-              `Flow [${selectedEdge.label || selectedEdge.id}] -> Moved to: ${nextNode.label}`,
-            ],
-            status: nextNode.type === 'END_EVENT' ? 'completed' : 'running',
-          }
-        : null
-    );
+    // Trigger Token Smooth Movement Animation along sequence flow edge
+    setIsStepping(true);
+    const startTime = performance.now();
+    const duration = Math.min(300, speedMs * 0.35);
+
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / duration);
+      setSimulationTokenAnim({ edgeId: selectedEdge.id, progress });
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        setSimulationTokenAnim(null);
+        setIsStepping(false);
+
+        // Update active node state
+        setSimulationState((prev) =>
+          prev
+            ? {
+                ...prev,
+                currentNodeId: nextNode.id,
+                activePathEdgeIds: Array.from(new Set([...prev.activePathEdgeIds, selectedEdge.id])),
+                visitedNodeIds: Array.from(new Set([...prev.visitedNodeIds, nextNode.id])),
+                logs: [
+                  ...prev.logs,
+                  `Transição [${selectedEdge.label || selectedEdge.id}] ➔ ${nextNode.label}`,
+                ],
+                status: nextNode.type === 'END_EVENT' ? 'completed' : 'running',
+              }
+            : null
+        );
+      }
+    };
+
+    requestAnimationFrame(animate);
   };
 
   useEffect(() => {
@@ -97,100 +161,176 @@ export function ProcessSimulatorModal() {
   // Auto-play timer
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isPlaying && simulationState?.status === 'running') {
+    if (isPlaying && simulationState?.status === 'running' && !isStepping) {
       interval = setInterval(() => {
         stepForward();
-      }, 1200);
+      }, speedMs);
     }
     return () => clearInterval(interval);
-  }, [isPlaying, simulationState]);
+  }, [isPlaying, simulationState, speedMs, isStepping]);
 
   const currentNode = diagram.nodes.find((n) => n.id === simulationState?.currentNodeId);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-emerald-500/10">
-          <div className="flex items-center space-x-2 text-emerald-700 dark:text-emerald-400">
-            <Play className="w-5 h-5 fill-current" />
-            <h3 className="font-semibold text-base">BPMN Interactive Process Simulator</h3>
-          </div>
-          <button
-            onClick={() => {
-              setSimulationState(null);
-              setActiveModal(null);
-            }}
-            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-5 space-y-4 text-sm">
-          {/* Active Status Badge */}
-          <div className="bg-slate-50 dark:bg-slate-800 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+    <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 w-full max-w-lg px-3 pointer-events-none">
+      <div className="pointer-events-auto bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-2.5 flex flex-col gap-2 transition-all select-none">
+        {/* Header Bar */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg flex items-center justify-center">
+              <Zap className="w-4 h-4 fill-current animate-pulse" />
+            </div>
             <div>
-              <span className="text-xs text-slate-500 font-medium block">Current Active Element</span>
-              <span className="font-semibold text-slate-800 dark:text-slate-100 text-base">
-                {currentNode?.label || 'Initializing...'}
+              <div className="flex items-center space-x-2">
+                <span className="font-bold text-xs uppercase tracking-wider text-slate-400">Simulador Executável</span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    simulationState?.status === 'completed'
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                      : 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 animate-pulse'
+                  }`}
+                >
+                  {simulationState?.status === 'completed' ? 'Finalizado' : 'Em Execução'}
+                </span>
+              </div>
+              <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 block">
+                {currentNode?.label || 'Iniciando...'}
               </span>
             </div>
-            <span
-              className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                simulationState?.status === 'completed'
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
-                  : 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 animate-pulse'
-              }`}
-            >
-              {simulationState?.status === 'completed' ? 'Completed' : 'Running...'}
-            </span>
           </div>
 
-          {/* Controls Bar */}
-          <div className="flex items-center justify-center space-x-3 bg-slate-100 dark:bg-slate-800/60 p-2 rounded-xl">
+          <div className="flex items-center space-x-1.5">
+            {/* Auto-Focus Camera Toggle */}
+            <button
+              onClick={() => setAutoFocus(!autoFocus)}
+              className={`p-1.5 rounded-lg border text-xs font-medium transition-all ${
+                autoFocus
+                  ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950/60 dark:border-indigo-800 dark:text-indigo-300'
+                  : 'bg-slate-100 dark:bg-slate-800 border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+              title="Acompanhamento Automático de Câmera"
+            >
+              <Focus className="w-4 h-4" />
+            </button>
+
+            {/* Toggle Variables Editor */}
+            <button
+              onClick={() => setShowVariables(!showVariables)}
+              className={`p-1.5 rounded-lg border text-xs font-medium transition-all ${
+                showVariables
+                  ? 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/60 dark:border-amber-800 dark:text-amber-300'
+                  : 'bg-slate-100 dark:bg-slate-800 border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+              title="Variáveis da Simulação"
+            >
+              <Sliders className="w-4 h-4" />
+            </button>
+
+            {/* Toggle Trace Logs */}
+            <button
+              onClick={() => setShowLogs(!showLogs)}
+              className={`p-1.5 rounded-lg border text-xs font-medium transition-all ${
+                showLogs
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/60 dark:border-emerald-800 dark:text-emerald-300'
+                  : 'bg-slate-100 dark:bg-slate-800 border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+              title="Ver Logs de Execução"
+            >
+              <Terminal className="w-4 h-4" />
+            </button>
+
+            {/* Close Button */}
+            <button
+              onClick={() => {
+                setSimulationState(null);
+                setSimulationTokenAnim(null);
+                setActiveModal(null);
+              }}
+              className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+              title="Fechar Simulador"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Floating Action Controls */}
+        <div className="flex items-center justify-between bg-slate-100/90 dark:bg-slate-800/80 p-1.5 rounded-xl text-xs font-medium">
+          <div className="flex items-center space-x-2">
             <button
               onClick={startSimulation}
-              className="p-2 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 font-medium flex items-center space-x-1 shadow-xs"
-              title="Reset Execution"
+              className="px-2.5 py-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 rounded-lg font-semibold flex items-center space-x-1 shadow-2xs transition-all cursor-pointer"
+              title="Reiniciar Simulação"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reiniciar</span>
             </button>
 
             <button
               onClick={() => setIsPlaying(!isPlaying)}
-              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center space-x-2 shadow-sm transition-all"
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg flex items-center space-x-1.5 shadow-xs transition-all cursor-pointer"
             >
-              {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
-              <span>{isPlaying ? 'Pause' : 'Auto Play'}</span>
+              {isPlaying ? <Pause className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+              <span>{isPlaying ? 'Pausar' : 'Rodar Automático'}</span>
             </button>
 
             <button
               onClick={stepForward}
-              disabled={simulationState?.status === 'completed'}
-              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center space-x-1.5 shadow-sm disabled:opacity-40 transition-all"
+              disabled={simulationState?.status === 'completed' || isStepping}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg flex items-center space-x-1.5 shadow-xs disabled:opacity-40 transition-all cursor-pointer"
             >
-              <span>Next Step</span>
-              <SkipForward className="w-4 h-4" />
+              <span>Avançar Passinho</span>
+              <SkipForward className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          {/* Execution Trace Logs */}
-          <div>
-            <span className="font-semibold text-xs text-slate-500 uppercase tracking-wider block mb-2">
-              Execution Trace Logs
-            </span>
-            <div className="bg-slate-900 text-slate-200 p-3 rounded-xl font-mono text-xs h-36 overflow-y-auto space-y-1 shadow-inner">
-              {simulationState?.logs.map((log, index) => (
-                <div key={index} className="flex items-start space-x-2">
-                  <span className="text-emerald-400">&gt;</span>
-                  <span>{log}</span>
-                </div>
-              ))}
-            </div>
+          {/* Speed Selector */}
+          <div className="flex items-center space-x-1 bg-white/80 dark:bg-slate-900/80 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+            {[
+              { label: '0.5x', ms: 1600 },
+              { label: '1x', ms: 1000 },
+              { label: '2x', ms: 500 },
+            ].map((s) => (
+              <button
+                key={s.label}
+                onClick={() => setSpeedMs(s.ms)}
+                className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all ${
+                  speedMs === s.ms
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
           </div>
         </div>
+
+        {/* Collapsible Variables Editor Drawer */}
+        {showVariables && (
+          <div className="p-2.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5">
+            <span className="text-[11px] font-bold uppercase text-slate-400 block">
+              Payload de Variáveis (JSON para Tomadas de Decisão)
+            </span>
+            <textarea
+              value={variablesText}
+              onChange={(e) => setVariablesText(e.target.value)}
+              className="w-full h-20 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-mono text-xs p-2 rounded-lg border border-slate-200 dark:border-slate-800 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+        )}
+
+        {/* Collapsible Log Terminal Drawer */}
+        {showLogs && (
+          <div className="bg-slate-950 text-slate-200 p-2.5 rounded-xl font-mono text-xs h-32 overflow-y-auto space-y-1 shadow-inner border border-slate-800">
+            {simulationState?.logs.map((log, index) => (
+              <div key={index} className="flex items-start space-x-2">
+                <span className="text-emerald-400 font-bold">&gt;</span>
+                <span>{log}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
